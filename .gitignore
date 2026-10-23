@@ -1,0 +1,24 @@
+# Compilación
+build/
+cmake-build-*/
+
+# Configuración generada
+sdkconfig
+sdkconfig.old
+
+# Componentes descargados
+managed_components/
+
+# PlatformIO
+.pio/
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python y logs
+__pycache__/
+*.pyc
+*.log
