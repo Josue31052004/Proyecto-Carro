@@ -21,7 +21,7 @@ El sistema se reparte entre dos unidades de cómputo:
 
 | Unidad | Responsabilidad |
 |---|---|
-| Raspberry Pi 3 | Interfaz web, visión por computadora, conteo de segmentos |
+| Raspberry Pi 5 | Interfaz web, visión por computadora, conteo de segmentos |
 | ESP32-WROOM-32 | Lazo de control PID, lectura de sensores, manejo de motores |
 
 La comunicación entre ambas es **únicamente por I2C**, con la Raspberry Pi como
