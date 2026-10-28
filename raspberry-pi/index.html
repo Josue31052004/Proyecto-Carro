@@ -88,7 +88,7 @@
   }
   .error.visible { display: block; }
 
-  .conteo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .conteo { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .marcador {
     text-align: center; padding: 16px 8px;
     border: 1px solid var(--borde); border-radius: 10px;
@@ -98,6 +98,7 @@
   .marcador.rojo .cifra { color: var(--rojo); }
   .marcador.verde .cifra { color: var(--verde); }
   .marcador.azul .cifra { color: var(--azul); }
+  .marcador.amarillo .cifra { color: #8a6500; }
 
   .pruebas button {
     padding: 10px 14px; margin: 0 8px 8px 0; font-size: 14px;
@@ -158,8 +159,8 @@
   </div>
 
   <div class="fila">
-    <span class="muestra" style="background:#555"></span>
-    <label for="selBif">Bifurcacion</label>
+    <span class="muestra" style="background:#f1c40f"></span>
+    <label for="selBif">Amarillo: bifurcacion</label>
     <select id="selBif">
       <option value="izquierda">Izquierda</option>
       <option value="derecha">Derecha</option>
@@ -175,6 +176,7 @@
     <div class="marcador rojo"><div class="cifra" id="cRojo">0</div><div class="nombre">Rojo</div></div>
     <div class="marcador verde"><div class="cifra" id="cVerde">0</div><div class="nombre">Verde</div></div>
     <div class="marcador azul"><div class="cifra" id="cAzul">0</div><div class="nombre">Azul</div></div>
+    <div class="marcador amarillo"><div class="cifra" id="cAmarillo">0</div><div class="nombre">Amarillo / bifurcacion</div></div>
   </div>
 </section>
 
@@ -222,6 +224,7 @@
     document.getElementById("cRojo").textContent = datos.conteo.rojo;
     document.getElementById("cVerde").textContent = datos.conteo.verde;
     document.getElementById("cAzul").textContent = datos.conteo.azul;
+    document.getElementById("cAmarillo").textContent = datos.conteo.amarillo;
 
     document.getElementById("ultimoCodigo").textContent = datos.ultimo_codigo < 0
       ? "—" : "0x" + datos.ultimo_codigo.toString(16).toUpperCase().padStart(2, "0");

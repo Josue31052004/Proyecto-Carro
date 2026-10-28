@@ -52,9 +52,27 @@ El programa C++ no abre un navegador ni lanza Python automaticamente.
 
 No implementa aun el bloqueo temporal de seis segundos ni confirmacion por
 varios frames. Una sola imagen NINGUNO rearma el filtro: calibrar en V2.
-No transmite I2C, no detecta bifurcaciones y no muestra video. El ramal se guarda
-como configuracion para etapas posteriores. Los cambios se pierden al reiniciar
+No transmite I2C ni muestra video. Amarillo representa una bifurcacion; el ramal se guarda
+como configuracion y determina la salida 0x04 (derecha) o 0x05 (izquierda). Los cambios se pierden al reiniciar
 C++. El estado activo indica el ciclo de software, no confirma movimiento fisico.
 La apertura y lectura de camara pueden bloquearse en el controlador, como en la
 demo original; Fin se procesa al retornar esas operaciones. Resolver ese limite
 antes de usar esta arquitectura como parada de hardware.
+
+## Amarillo como bifurcacion
+
+El detector agrega amarillo con H=20..34, S>=80, V>=50 y ocupacion minima 8%.
+Es un rango inicial por calibrar. Se conserva la region central y los umbrales
+RGB. Dos colores suficientes simultaneos devuelven INDETERMINADO.
+
+NINGUNO=-1 e INDETERMINADO=-2 son resultados internos, nunca bytes transmitidos.
+Inicio sigue siendo 0x00 y Fin 0xFF. Los identificadores de color (1..4) se
+traducen a acciones antes de EnviarCodigo; amarillo no indexa la asignacion RGB.
+La salida sigue siendo solo terminal, hasta implementar el transporte I2C.
+
+Pruebas en Raspberry:
+- Elegir derecha, iniciar y presentar amarillo: una salida 0x04 y un conteo amarillo.
+- Mantener amarillo: no repetir. Retirar hasta NINGUNO y volver: nuevo evento.
+- Fin, elegir izquierda y reiniciar: amarillo debe producir 0x05.
+- Presentar amarillo y rojo suficientes juntos: INDETERMINADO, sin orden.
+- Negro/blanco: NINGUNO, sin orden de Inicio. Confirmar RGB como antes.

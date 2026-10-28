@@ -13,12 +13,14 @@
 #include <string>
 #include <thread>
 
-constexpr int NINGUNO = 0x00, ROJO = 0x01, VERDE = 0x02, AZUL = 0x03;
-constexpr int INDETERMINADO = 0xFF;
+// Resultados internos: los valores negativos nunca se envian al ESP32.
+constexpr int NINGUNO = -1, INDETERMINADO = -2;
+constexpr int ROJO = 1, VERDE = 2, AZUL = 3, AMARILLO = 4;
 constexpr double FRACCION_MINIMA = 0.08;
 constexpr int SATURACION_MINIMA = 80, BRILLO_MINIMO = 50;
 // Estos son codigos de ACCION, no resultados del detector.
 constexpr int INICIO = 0x00, FIN = 0xFF;
+constexpr int BIF_DERECHA = 0x04, BIF_IZQUIERDA = 0x05;
 volatile std::sig_atomic_t terminar = 0;
 void solicitarSalida(int) { terminar = 1; }
 
@@ -27,7 +29,7 @@ int detectarColor(const cv::Mat& imagen) {
     if (imagen.empty() || imagen.type() != CV_8UC3)
         return INDETERMINADO; //Condicion de error
 
-    cv::Mat hsv, rojo1, rojo2, rojo, verde, azul; //Crear imagenes auxiliares
+    cv::Mat hsv, rojo1, rojo2, rojo, verde, azul, amarillo;
     cv::cvtColor(imagen, hsv, cv::COLOR_BGR2HSV); //Convierte BGR a HSV
          // HSV: tono H de 0 a 179; saturacion S y brillo V de 0 a 255.
     // El rojo aparece en los dos extremos de H.
@@ -43,6 +45,9 @@ int detectarColor(const cv::Mat& imagen) {
                 cv::Scalar(85, 255, 255), verde);
     cv::inRange(hsv, cv::Scalar(95, SATURACION_MINIMA, BRILLO_MINIMO),
                 cv::Scalar(130, 255, 255), azul);
+    // Rango inicial de amarillo; calibrar con el material y luz de la pista.
+    cv::inRange(hsv, cv::Scalar(20, SATURACION_MINIMA, BRILLO_MINIMO),
+                cv::Scalar(34, 255, 255), amarillo);
 
 
 
@@ -50,13 +55,15 @@ int detectarColor(const cv::Mat& imagen) {
     bool hayRojo = cv::countNonZero(rojo) >= minimo; //Definir si hay suficiente rojo
     bool hayVerde = cv::countNonZero(verde) >= minimo; //Definir si hay suficiente verde
     bool hayAzul = cv::countNonZero(azul) >= minimo; //Definir si hay suficiente azul
+    bool hayAmarillo = cv::countNonZero(amarillo) >= minimo;
 
-    if (int(hayRojo) + int(hayVerde) + int(hayAzul) > 1)
+    if (int(hayRojo) + int(hayVerde) + int(hayAzul) + int(hayAmarillo) > 1)
         return INDETERMINADO; //Se detecto mas de 1 color
     if (hayRojo) return ROJO; //Regresar codigo correspondiente
     if (hayVerde) return VERDE; //Regresar codigo correspondiente
     if (hayAzul) return AZUL; //Regresar codigo correspondiente
-    return NINGUNO;// No detecto ninguno de los 3 colores
+    if (hayAmarillo) return AMARILLO;
+    return NINGUNO; // No detecto ninguno de los cuatro colores.
 }
 
 const char* nombreColor(int color) { //Convertir el codigo hex a un string. (Eventualmente realizaraccion() recibira el string y mandara la accion correspondiente)
@@ -64,6 +71,7 @@ const char* nombreColor(int color) { //Convertir el codigo hex a un string. (Eve
         case ROJO: return "ROJO";
         case VERDE: return "VERDE";
         case AZUL: return "AZUL";
+        case AMARILLO: return "AMARILLO";
         case NINGUNO: return "NINGUNO";
         default: return "INDETERMINADO";
     }
@@ -76,7 +84,7 @@ struct Estado {
     std::mutex mutex;
     bool activo = false, iniciar = false, detener = false;
     std::array<int, 3> acciones{1, 2, 3};
-    std::array<unsigned, 3> conteo{0, 0, 0};
+    std::array<unsigned, 4> conteo{0, 0, 0, 0};
     std::string ramal = "derecha";
     std::string error;
     int ultimoCodigo = -1;
@@ -94,7 +102,7 @@ bool LogicaBloqueo(int color, Bloqueo& bloqueo) {
         bloqueo.ultimoColor = NINGUNO;
         return false;
     }
-    if (color < ROJO || color > AZUL || color == bloqueo.ultimoColor) return false;
+    if (color < ROJO || color > AMARILLO || color == bloqueo.ultimoColor) return false;
     bloqueo.ultimoColor = color;
     return true;
 }
@@ -102,6 +110,10 @@ bool LogicaBloqueo(int color, Bloqueo& bloqueo) {
 // Unico punto de salida. Sustituir el cuerpo por el transporte I2C en V3.
 // Por ahora NO abre /dev/i2c ni escribe en GPIO.
 bool EnviarCodigo(int codigo, Estado& estado) {
+    if (!((codigo >= INICIO && codigo <= BIF_IZQUIERDA) || codigo == FIN)) {
+        std::cerr << "Codigo de salida invalido: " << codigo << std::endl;
+        return false;
+    }
     estado.ultimoCodigo = codigo; // Llamar con el mutex de estado adquirido.
     std::cout << "[TERMINAL; sin I2C] Codigo de accion -> 0x"
               << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
@@ -123,6 +135,13 @@ int codigoAccion(const std::string& nombre) {
     return -1;
 }
 
+int accionParaColor(int color, const Estado& estado) {
+    if (color == AMARILLO)
+        return estado.ramal == "derecha" ? BIF_DERECHA : BIF_IZQUIERDA;
+    if (color >= ROJO && color <= AZUL) return estado.acciones[color - ROJO];
+    return -1; // No convertir ausencia o ambiguedad en orden.
+}
+
 void CicloEjecucion(Estado& estado) {
     // Misma cadena de captura que la demo funcional.
     const std::string pipeline =
@@ -142,7 +161,7 @@ void CicloEjecucion(Estado& estado) {
         EnviarCodigo(INICIO, estado);
     }
     cv::Mat imagen;
-    int ultimoColor = -1;
+    int ultimoColor = -3; // Distinto de todos los resultados del detector.
     while (!terminar) {
         {
             std::lock_guard<std::mutex> acceso(estado.mutex);
@@ -164,7 +183,7 @@ void CicloEjecucion(Estado& estado) {
         }
         if (LogicaBloqueo(color, bloqueo)) {
             ++estado.conteo[color - 1];
-            EnviarCodigo(estado.acciones[color - 1], estado);
+            EnviarCodigo(accionParaColor(color, estado), estado);
         }
     }
 }
@@ -182,6 +201,7 @@ void configurarAPI(httplib::Server& api, Estado& estado) {
              << ",\"ultimo_codigo\":" << estado.ultimoCodigo
              << ",\"conteo\":{\"rojo\":" << estado.conteo[0]
              << ",\"verde\":" << estado.conteo[1] << ",\"azul\":" << estado.conteo[2]
+             << ",\"amarillo\":" << estado.conteo[3]
              << "},\"asignacion\":{\"rojo\":\"" << nombreAccion(estado.acciones[0])
              << "\",\"verde\":\"" << nombreAccion(estado.acciones[1])
              << "\",\"azul\":\"" << nombreAccion(estado.acciones[2])
@@ -227,7 +247,7 @@ void configurarAPI(httplib::Server& api, Estado& estado) {
             return;
         }
         estado.acciones = acciones;
-        estado.ramal = ramal; // Se almacena; V1 no detecta bifurcaciones.
+        estado.ramal = ramal; // Amarillo dispara la direccion elegida.
         r.set_content("{\"ok\":true}", "application/json");
     });
 }
