@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camara del carrito</title>
+<style>
+body{font:17px system-ui;background:#18212c;color:#f3f6fa;margin:24px auto;max-width:850px;padding:0 16px}
+a{color:#9bd5ff}img{display:block;width:100%;max-width:640px;border:2px solid #738399}img[hidden]{display:none}
+p{line-height:1.5}#estado{color:#ffd76b}.nota{color:#ced7e2}
+</style>
+</head>
+<body>
+<a href="/">Volver al control</a>
+<h1>Camara y deteccion de colores</h1>
+<p>Inicia el ciclo desde la pagina de control para activar la camara. Esta vista no genera ordenes.</p>
+<p id="estado" role="status">Conectando...</p>
+<img id="camara" alt="Camara con region central, color detectado y porcentajes" hidden>
+<p class="nota">R: rojo · V: verde · A: azul. Los porcentajes indican la parte de la region central que cumple cada rango HSV. Se acepta un color al llegar al 8%; si varios llegan, el resultado es INDETERMINADO.</p>
+<p class="nota">Amarillo: H entre 20 y 34, S desde 80 y V desde 50. Si el material ocupa la region pero el porcentaje es bajo, revisa el rango HSV y la iluminacion. Publicacion de hasta 10 imagenes/s.</p>
+<script>
+const foto = document.getElementById('camara');
+const estado = document.getElementById('estado');
+let anterior;
+function ocultar(mensaje) {
+  foto.hidden = true;
+  foto.removeAttribute('src');
+  if (anterior) URL.revokeObjectURL(anterior);
+  anterior = undefined;
+  estado.textContent = mensaje;
+}
+async function actualizar() {
+  const control = new AbortController();
+  const limite = setTimeout(() => control.abort(), 3000);
+  let siguiente;
+  try {
+    const respuesta = await fetch('/api/camara.jpg', {cache:'no-store', signal:control.signal});
+    if (!respuesta.ok) throw new Error('Sin imagen reciente');
+    siguiente = URL.createObjectURL(await respuesta.blob());
+    const prueba = new Image();
+    prueba.src = siguiente;
+    await prueba.decode();
+    if (control.signal.aborted) throw new Error('Imagen vencida');
+    foto.src = siguiente;
+    foto.hidden = false;
+    if (anterior) URL.revokeObjectURL(anterior);
+    anterior = siguiente;
+    siguiente = undefined;
+    estado.textContent = 'Recibiendo imagenes · ' + new Date().toLocaleTimeString();
+  } catch (error) {
+    ocultar('Camara detenida o sin imagen reciente. Revisa Inicio, ciclo_main y la conexion.');
+  } finally {
+    if (siguiente) URL.revokeObjectURL(siguiente);
+    clearTimeout(limite);
+    setTimeout(actualizar, 150);
+  }
+}
+actualizar();
+</script>
+</body>
+</html>
