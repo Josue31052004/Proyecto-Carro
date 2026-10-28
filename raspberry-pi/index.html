@@ -178,14 +178,7 @@
   </div>
 </section>
 
-<section class="pruebas">
-  <h2>Pruebas</h2>
-  <p class="aviso">Simulan eventos de la camara. Eliminar esta seccion para la entrega final.</p>
-  <button data-simular="rojo">Segmento rojo</button>
-  <button data-simular="verde">Segmento verde</button>
-  <button data-simular="azul">Segmento azul</button>
-  <button data-simular="bifurcacion">Bifurcacion</button>
-</section>
+<section><h2>Salida V1</h2><p>Modo terminal: sin I2C. Los colores proceden de la camara.</p><p>Ultimo codigo de accion: <strong id="ultimoCodigo">—</strong></p></section>
 
 <footer id="conexion">Conectando...</footer>
 
@@ -217,19 +210,24 @@
   }
 
   function pintarEstado(datos) {
-    enMovimiento = datos.en_movimiento;
+    enMovimiento = datos.en_movimiento || datos.iniciando;
 
     var caja = document.getElementById("estado");
-    document.getElementById("estadoTexto").textContent = enMovimiento ? "En movimiento" : "Detenido";
+    document.getElementById("estadoTexto").textContent = datos.iniciando ? "Iniciando camara..." : (enMovimiento ? "Ciclo activo (demo)" : "Detenido");
     caja.classList.toggle("moviendo", enMovimiento);
 
-    document.getElementById("btnInicio").disabled = enMovimiento;
+    document.getElementById("btnInicio").disabled = enMovimiento || editando;
     document.getElementById("btnFin").disabled = !enMovimiento;
 
     document.getElementById("cRojo").textContent = datos.conteo.rojo;
     document.getElementById("cVerde").textContent = datos.conteo.verde;
     document.getElementById("cAzul").textContent = datos.conteo.azul;
 
+    document.getElementById("ultimoCodigo").textContent = datos.ultimo_codigo < 0
+      ? "—" : "0x" + datos.ultimo_codigo.toString(16).toUpperCase().padStart(2, "0");
+    if (datos.error) mostrarError(datos.error);
+    for (var c in selectores) selectores[c].disabled = enMovimiento || editando;
+    selBif.disabled = enMovimiento || editando;
     // No se sobrescriben los selectores mientras el usuario los manipula.
     if (!editando) {
       ultimaAsignacion = datos.asignacion;
@@ -261,6 +259,9 @@
     };
 
     editando = true;
+    for (var c in selectores) selectores[c].disabled = true;
+    selBif.disabled = true;
+    document.getElementById("btnInicio").disabled = true;
     fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -281,7 +282,7 @@
         mostrarError("Sin conexion con la Raspberry Pi.");
         restaurarSelectores();
       })
-      .then(function () { editando = false; });
+      .then(function () { editando = false; consultarEstado(); });
   }
 
   // Al cambiar un color, la accion que ya tenia otro color se intercambia,
@@ -304,35 +305,40 @@
   }
   selBif.addEventListener("change", enviarConfiguracion);
 
-  document.getElementById("btnInicio").addEventListener("click", function () {
+  function enviarOrden(ruta) {
     limpiarError();
-    fetch("/api/inicio", { method: "POST" }).then(consultarEstado);
-  });
-
-  document.getElementById("btnFin").addEventListener("click", function () {
-    fetch("/api/fin", { method: "POST" }).then(consultarEstado);
-  });
-
-  var botonesPrueba = document.querySelectorAll("[data-simular]");
-  for (var i = 0; i < botonesPrueba.length; i++) {
-    botonesPrueba[i].addEventListener("click", function (evento) {
-      var que = evento.target.getAttribute("data-simular");
-      var ruta = (que === "bifurcacion")
-        ? "/api/simular/bifurcacion"
-        : "/api/simular/color/" + que;
-      fetch(ruta, { method: "POST" }).then(consultarEstado);
-    });
+    fetch(ruta, { method: "POST" })
+      .then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok) throw new Error(d.error || "No se pudo enviar la solicitud");
+        });
+      })
+      .then(consultarEstado)
+      .catch(function (e) { mostrarError(e.message); });
   }
+  document.getElementById("btnInicio").addEventListener("click", function () {
+    enviarOrden("/api/inicio");
+  });
+  document.getElementById("btnFin").addEventListener("click", function () {
+    enviarOrden("/api/fin");
+  });
 
   function consultarEstado() {
     return fetch("/api/estado")
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok) throw new Error(d.error || "Error al consultar estado");
+          return d;
+        });
+      })
       .then(function (datos) {
         pintarEstado(datos);
         pieConexion.textContent = "Conectado";
       })
       .catch(function () {
-        pieConexion.textContent = "Sin conexion con la Raspberry Pi";
+        document.getElementById("estadoTexto").textContent = "Estado desconocido";
+        document.getElementById("btnInicio").disabled = true;
+        pieConexion.textContent = "Sin conexion con la Raspberry Pi o ciclo_main";
       });
   }
 

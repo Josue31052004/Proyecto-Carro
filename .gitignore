@@ -26,3 +26,6 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Ejecutable local del ciclo Raspberry
+raspberry-pi/ciclo_main
