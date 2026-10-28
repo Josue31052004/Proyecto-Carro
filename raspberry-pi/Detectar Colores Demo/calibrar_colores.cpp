@@ -110,6 +110,7 @@ int detectarColorDemo(bool mostrarVentana, bool mostrarWeb) {
             bool abierta = false;
             try { abierta = camara.open(pipeline.str(), cv::CAP_GSTREAMER); }
             catch (const cv::Exception& e) { std::cerr << e.what() << std::endl; }
+            if (terminar) break;
             if (!abierta) {
                 std::cerr << "No se pudo abrir la camara con " << config.ancho << 'x'
                           << config.alto << ". Seleccione otra resolucion y pulse Aplicar.\n";
@@ -119,7 +120,9 @@ int detectarColorDemo(bool mostrarVentana, bool mostrarWeb) {
             }
             fallo=false;anchoAbierto=config.ancho;altoAbierto=config.alto;
         }
-        if (!camara.read(imagen) || imagen.empty()) { //Obtener frame con camara.read y almacenarla. Ademas compara a ver si hay error
+        const bool capturada = camara.read(imagen);
+        if (terminar) break; // Ctrl+C: no procesar ni publicar otra imagen.
+        if (!capturada || imagen.empty()) {
             std::cerr << "Error de captura: flag invalida (0xFF).\n"; //msg de error
             if (!vista) return 1;
             vista->invalidar();camara.release();fallo=true;intento=version;continue;
@@ -168,7 +171,10 @@ int detectarColorDemo(bool mostrarVentana, bool mostrarWeb) {
             if (tecla == 'q' || tecla == 27) break;
         }
     }
-    return 0; //Finalizar
+    std::cout << "Cerrando calibracion: liberando camara y servidor web..." << std::endl;
+    camara.release();
+    vista.reset(); // Detiene HTTP y espera a que termine su hilo.
+    return 0;
 }
 
 int main(int argc, char** argv) {
@@ -180,6 +186,7 @@ int main(int argc, char** argv) {
     }
     std::signal(SIGINT, solicitarSalida);
     std::signal(SIGTERM, solicitarSalida);
+    std::cout << "Para cerrar: Ctrl+C en esta terminal." << std::endl;
     try {
         int resultado = detectarColorDemo(modo == "--ventana", modo == "--web");
         if (modo == "--ventana") cv::destroyAllWindows();
