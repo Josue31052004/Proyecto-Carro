@@ -12,12 +12,13 @@
 #define LOOP_MS 2       // periodo del lazo de control
 #define LOG_EVERY 100   // imprimir cada N ciclos (100 * 2ms = 200ms)
 #define error_perdido 3.0f  // error cuando ningun sensor ve la linea
+#define D_WINDOW 10     // la derivada compara contra el error de hace N ciclos (10 * 2ms = 20ms)
 
-#define umbralr2 300
-#define umbralr1 300
-#define umbralc 300
-#define umbral1 300
-#define umbral2 300
+#define umbralr2 600
+#define umbralr1 600
+#define umbralc 600
+#define umbral1 600
+#define umbral2 600
 
 int sensor_r2 = 0;
 int sensor_r1 = 0;
@@ -40,8 +41,11 @@ float u = 0.0f;
 void pid_sensor_control(void *pvParameters)
 {
     TickType_t last_wake = xTaskGetTickCount();
-    float last_side = 0.0f;  // ultimo lado donde se vio la linea (-1 izquierda, 1 derecha)
+    float last_position = 0.0f;  // ultima posicion donde un sensor vio la linea
+    float trend = 0.0f;          // hacia donde se movia la linea (-1 izquierda, 1 derecha)
     int log_count = 0;
+    float error_hist[D_WINDOW] = {0};  // historial de errores para la derivada
+    int hist_idx = 0;
 
     while (1)
     {
@@ -62,19 +66,36 @@ void pid_sensor_control(void *pvParameters)
         if(suma_sensores > 0){
             position = (digital_l2*-2.0f + digital_l1*-1.0f + digital_c*0.0f + digital_r1*1.0f + digital_r2*2.0f) / (float)suma_sensores;
             error = position - 0.0f;
-            if(error != 0.0f){
-                last_side = error > 0.0f ? 1.0f : -1.0f;
+            if(position != last_position){
+                trend = position > last_position ? 1.0f : -1.0f;
             }
+            last_position = position;
         }
         else{
-            // linea perdida: girar fuerte hacia el lado donde se vio por ultima vez
-            error = error_perdido * last_side;
+            if(last_position >= 2.0f && trend >= 0.0f){
+                // se vio por ultima vez en R2 y se iba hacia afuera: linea perdida por la derecha
+                error = error_perdido;
+                last_position = error_perdido;  // asi al volver a R2 la tendencia apunta hacia adentro
+            }
+            else if(last_position <= -2.0f && trend <= 0.0f){
+                // se vio por ultima vez en L2 y se iba hacia afuera: linea perdida por la izquierda
+                error = -error_perdido;
+                last_position = -error_perdido;
+            }
+            else{
+                // la linea esta en el hueco entre dos sensores, medio paso desde la ultima posicion
+                error = last_position + 0.5f*trend;
+            }
         }
 
         p_term = error*kp;
         suma_error = suma_error + error;
         i_term = suma_error*ki;
-        d_term = (error - last_error)*kd;
+        // derivada sobre una ventana de D_WINDOW ciclos: con sensores digitales el error cambia
+        // en escalones y la diferencia de un solo ciclo (2ms) es un pico que el motor no alcanza a sentir
+        d_term = (error - error_hist[hist_idx])*kd;
+        error_hist[hist_idx] = error;
+        hist_idx = (hist_idx + 1) % D_WINDOW;
 
         u = p_term + i_term + d_term;
         last_error = error;
