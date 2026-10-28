@@ -2,6 +2,7 @@
 #include <opencv2/opencv.hpp>
 #include <httplib.h>
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -12,6 +13,8 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
+#include <utility>
 
 // Resultados internos: los valores negativos nunca se envian al ESP32.
 constexpr int NINGUNO = -1, INDETERMINADO = -2;
@@ -25,7 +28,8 @@ volatile std::sig_atomic_t terminar = 0;
 void solicitarSalida(int) { terminar = 1; }
 
 // Analiza una imagen BGR. No cuenta, no bloquea y no envia I2C.
-int detectarColor(const cv::Mat& imagen) {
+int detectarColor(const cv::Mat& imagen, std::array<double, 4>& porcentajes) {
+    porcentajes.fill(0);
     if (imagen.empty() || imagen.type() != CV_8UC3)
         return INDETERMINADO; //Condicion de error
 
@@ -56,6 +60,10 @@ int detectarColor(const cv::Mat& imagen) {
     bool hayVerde = cv::countNonZero(verde) >= minimo; //Definir si hay suficiente verde
     bool hayAzul = cv::countNonZero(azul) >= minimo; //Definir si hay suficiente azul
     bool hayAmarillo = cv::countNonZero(amarillo) >= minimo;
+    porcentajes = {100.0 * cv::countNonZero(rojo) / imagen.total(),
+                   100.0 * cv::countNonZero(verde) / imagen.total(),
+                   100.0 * cv::countNonZero(azul) / imagen.total(),
+                   100.0 * cv::countNonZero(amarillo) / imagen.total()};
 
     if (int(hayRojo) + int(hayVerde) + int(hayAzul) + int(hayAmarillo) > 1)
         return INDETERMINADO; //Se detecto mas de 1 color
@@ -88,6 +96,8 @@ struct Estado {
     std::string ramal = "derecha";
     std::string error;
     int ultimoCodigo = -1;
+    std::string jpeg;
+    std::chrono::steady_clock::time_point ultimaImagen{};
 };
 struct Bloqueo {
     int ultimoColor = NINGUNO;
@@ -162,6 +172,7 @@ void CicloEjecucion(Estado& estado) {
     }
     cv::Mat imagen;
     int ultimoColor = -3; // Distinto de todos los resultados del detector.
+    auto ultimaPublicacion = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     while (!terminar) {
         {
             std::lock_guard<std::mutex> acceso(estado.mutex);
@@ -174,9 +185,38 @@ void CicloEjecucion(Estado& estado) {
             throw std::runtime_error("Tamano de imagen invalido");
         cv::Rect region(imagen.cols / 4, imagen.rows / 4,
                         imagen.cols / 2, imagen.rows / 2);
-        const int color = detectarColor(imagen(region));
+        std::array<double, 4> porcentajes{};
+        const int color = detectarColor(imagen(region), porcentajes);
+        // Dibujar DESPUES de detectar; no altera las mascaras ni el resultado.
+        // Codificar fuera del mutex para no bloquear las solicitudes de control.
+        std::string nuevoJpeg;
+        const auto captura = std::chrono::steady_clock::now();
+        if (captura - ultimaPublicacion >= std::chrono::milliseconds(100)) {
+            cv::rectangle(imagen, region, cv::Scalar(0, 255, 255), 2);
+            cv::rectangle(imagen, cv::Rect(0, 0, imagen.cols, std::min(90, imagen.rows)),
+                          cv::Scalar(0, 0, 0), cv::FILLED);
+            cv::putText(imagen, nombreColor(color), cv::Point(10, 25),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(255, 255, 255), 1);
+            std::ostringstream texto;
+            texto << std::fixed << std::setprecision(1)
+                  << "R " << porcentajes[0] << "%  V " << porcentajes[1]
+                  << "%  A " << porcentajes[2] << "%  Amarillo " << porcentajes[3] << "%";
+            cv::putText(imagen, texto.str(), cv::Point(10, 50),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+            cv::putText(imagen, "Umbral: 8% de la region central", cv::Point(10, 75),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+            std::vector<uchar> bytes;
+            if (!cv::imencode(".jpg", imagen, bytes, {cv::IMWRITE_JPEG_QUALITY, 75}))
+                throw std::runtime_error("No se pudo codificar la vista de camara");
+            nuevoJpeg.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            ultimaPublicacion = captura;
+        }
         std::lock_guard<std::mutex> acceso(estado.mutex);
         if (estado.detener || terminar) break;
+        if (!nuevoJpeg.empty()) {
+            estado.jpeg = std::move(nuevoJpeg);
+            estado.ultimaImagen = captura;
+        }
         if (color != ultimoColor) {
             std::cout << "[VISION] " << nombreColor(color) << std::endl;
             ultimoColor = color;
@@ -192,6 +232,17 @@ void CicloEjecucion(Estado& estado) {
 // Los handlers solicitan inicio/fin; solo el hilo principal controla la camara
 // y llama EnviarCodigo(). La configuracion se protege con el mismo mutex.
 void configurarAPI(httplib::Server& api, Estado& estado) {
+    api.Get("/api/camara.jpg", [&](const httplib::Request&, httplib::Response& r) {
+        r.set_header("Cache-Control", "no-store");
+        std::lock_guard<std::mutex> acceso(estado.mutex);
+        if (!estado.activo || estado.detener || estado.jpeg.empty() ||
+            std::chrono::steady_clock::now() - estado.ultimaImagen > std::chrono::seconds(2)) {
+            r.status = 503;
+            r.set_content("{\"error\":\"Camara detenida o sin imagen reciente\"}", "application/json");
+            return;
+        }
+        r.set_content(estado.jpeg, "image/jpeg");
+    });
     api.Get("/api/estado", [&](const httplib::Request&, httplib::Response& r) {
         std::lock_guard<std::mutex> acceso(estado.mutex);
         std::ostringstream json;
@@ -295,6 +346,7 @@ int main() {
             std::lock_guard<std::mutex> acceso(estado.mutex);
             EnviarCodigo(FIN, estado);
             estado.activo = estado.iniciar = estado.detener = false;
+            estado.jpeg.clear();
         }
         std::cout << "Ciclo detenido. Esperando Inicio.\n";
     }

@@ -52,7 +52,7 @@ El programa C++ no abre un navegador ni lanza Python automaticamente.
 
 No implementa aun el bloqueo temporal de seis segundos ni confirmacion por
 varios frames. Una sola imagen NINGUNO rearma el filtro: calibrar en V2.
-No transmite I2C ni muestra video. Amarillo representa una bifurcacion; el ramal se guarda
+No transmite I2C. Amarillo representa una bifurcacion; el ramal se guarda
 como configuracion y determina la salida 0x04 (derecha) o 0x05 (izquierda). Los cambios se pierden al reiniciar
 C++. El estado activo indica el ciclo de software, no confirma movimiento fisico.
 La apertura y lectura de camara pueden bloquearse en el controlador, como en la
@@ -76,3 +76,18 @@ Pruebas en Raspberry:
 - Fin, elegir izquierda y reiniciar: amarillo debe producir 0x05.
 - Presentar amarillo y rojo suficientes juntos: INDETERMINADO, sin orden.
 - Negro/blanco: NINGUNO, sin orden de Inicio. Confirmar RGB como antes.
+
+## Vista de camara
+
+Abrir `/camara` en el mismo servidor (puerto 8000), o usar el enlace de Control.
+No requiere otro proceso: C++ publica un JPEG de la misma captura hasta 10 veces
+por segundo. Python solo reenvia los bytes. No abrir la demo anterior a la vez.
+Los porcentajes y el color se dibujan sobre el mismo frame, despues de detectar.
+La vista no cambia rangos HSV ni la logica de eventos.
+
+Prueba: antes de Inicio no hay imagen; despues se ve el rectangulo central,
+resultado y porcentajes RGB/amarillo. Al pulsar Fin debe ocultarse la imagen.
+Si se pierde la conexion se oculta tras el timeout de 3 segundos; C++ rechaza
+frames con mas de 2 segundos de antiguedad. Repetir Inicio para comprobar rearme.
+Mantener Control y Camara abiertos y comprobar que Fin sigue respondiendo.
+Para actualizar hay que copiar tambien camara.html, reiniciar Python y recompilar C++.
