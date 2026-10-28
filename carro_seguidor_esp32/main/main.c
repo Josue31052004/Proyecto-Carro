@@ -22,17 +22,6 @@
 #define motor_ldc_channel_1 LEDC_CHANNEL_0
 #define motor_ldc_channel_2 LEDC_CHANNEL_1
 
-//I2C
-#define I2C_SLAVE_SCL_IO      18 //22
-#define I2C_SLAVE_SDA_IO      17 //21
-#define I2C_SLAVE_PORT        I2C_NUM_0
-#define I2C_SLAVE_ADDR        0x28
-
-app_context_t context = {
-    .handle = NULL,
-    .event_queue = NULL
-};
-
 adc_oneshot_unit_handle_t adc1_handle = NULL;
 
 void app_main(void)
@@ -118,49 +107,13 @@ void app_main(void)
 
     /*------------------CONFIGURE I2C-------------------*/
 
-    context.event_queue = xQueueCreate(10, sizeof(i2c_slave_event_t));
-    if (context.event_queue == NULL) {
-        ESP_LOGE("MAIN", "Error: No se pudo crear la cola de FreeRTOS");
-        return;
-    }
-    
-    i2c_slave_config_t i2c_slv_config = {
-        .i2c_port = I2C_SLAVE_PORT,
-        .sda_io_num = I2C_SLAVE_SDA_IO,
-        .scl_io_num = I2C_SLAVE_SCL_IO,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .slave_addr = I2C_SLAVE_ADDR,
-        .addr_bit_len = I2C_ADDR_BIT_LEN_7,
-        .send_buf_depth = 100,
-    };
-
-    ESP_ERROR_CHECK(i2c_new_slave_device(&i2c_slv_config, &context.handle));
-
+    communication_init();
 
     /*------------------END CONFIGURE I2C-------------------*/
-
-    i2c_slave_event_callbacks_t cbs = {
-        .on_recv_done = i2c_slave_receive_cb,
-    };
-    ESP_ERROR_CHECK(i2c_slave_register_event_callbacks(context.handle, &cbs, &context));
 
 
     motor_init();
 
-    xTaskCreate(&pid_sensor_control, "pid_sensor_control", 4096, &context, 5, NULL);
+    xTaskCreate(&pid_sensor_control, "pid_sensor_control", 4096, NULL, 5, NULL);
 
-}
-
-
-static bool i2c_slave_receive_cb(i2c_slave_dev_handle_t i2c_slave, const i2c_slave_rx_done_event_data_t *evt_data, void *arg)
-{
-    app_context_t *ctx = (app_context_t *)arg;
-    i2c_slave_event_t evt = I2C_SLAVE_EVT_RX;
-    BaseType_t xTaskWoken = pdFALSE;
-
-    if (ctx && ctx->event_queue) {
-        xQueueSendFromISR(ctx->event_queue, &evt, &xTaskWoken);
-    }
-
-    return (xTaskWoken == pdTRUE);
 }
