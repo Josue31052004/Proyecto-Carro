@@ -25,6 +25,7 @@ constexpr int SATURACION_MINIMA = 80, BRILLO_MINIMO = 50;
 // Estos son codigos de ACCION, no resultados del detector.
 constexpr int INICIO = 0x00, FIN = 0xFF;
 constexpr int BIF_DERECHA = 0x04, BIF_IZQUIERDA = 0x05;
+const std::chrono::seconds tiempopausa{5}; // Pausa entre eventos, sin detener captura.
 volatile std::sig_atomic_t terminar = 0;
 void solicitarSalida(int) { terminar = 1; }
 
@@ -102,19 +103,25 @@ struct Estado {
 };
 struct Bloqueo {
     int ultimoColor = NINGUNO;
+    bool activo = false;
+    std::chrono::steady_clock::time_point limite{};
 };
 
-// V1: evita repetir la misma lectura consecutiva. El bloqueo temporal de seis
-// segundos y la confirmacion de salida se incorporaran en V2.
-// No enviar NINGUNO ni INDETERMINADO como comandos de movimiento.
+// Solo permite otra orden cuando paso tiempopausa Y la observacion actual
+// es distinta del color que disparo la anterior. No duerme ni espera en un bucle.
+// NINGUNO permite rearmar despues del plazo, pero no genera una orden.
+// INDETERMINADO no confirma cambio ni rearma. Inicio/Fin no pasan por este filtro.
 bool LogicaBloqueo(int color, Bloqueo& bloqueo) {
-    if (color == INDETERMINADO) return false;
-    if (color == NINGUNO) {
-        bloqueo.ultimoColor = NINGUNO;
-        return false;
+    if (color != NINGUNO && (color < ROJO || color > AMARILLO)) return false;
+    const auto ahora = std::chrono::steady_clock::now();
+    if (bloqueo.activo) {
+        if (ahora < bloqueo.limite || color == bloqueo.ultimoColor) return false;
+        bloqueo.activo = false;
     }
-    if (color < ROJO || color > AMARILLO || color == bloqueo.ultimoColor) return false;
+    if (color == NINGUNO) return false;
     bloqueo.ultimoColor = color;
+    bloqueo.limite = ahora + tiempopausa;
+    bloqueo.activo = true;
     return true;
 }
 
@@ -126,9 +133,9 @@ bool EnviarCodigo(int codigo, Estado& estado) {
         return false;
     }
     estado.ultimoCodigo = codigo; // Llamar con el mutex de estado adquirido.
-    std::cout << "[TERMINAL; sin I2C] Codigo de accion -> 0x"
+    std::cout << "[SIMULACION; sin I2C] Codigo enviado 0x"
               << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-              << codigo << std::dec << std::endl;
+              << codigo << std::dec << ", esperando nueva deteccion." << std::endl;
     return true;
 }
 
