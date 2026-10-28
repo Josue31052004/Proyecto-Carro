@@ -1,6 +1,7 @@
 // Coordinador Raspberry. V1: salida por terminal; sin transmisiones I2C.
 #include <opencv2/opencv.hpp>
 #include <httplib.h>
+#include "vista_control.hpp"
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -228,10 +229,17 @@ void CicloEjecucion(Estado& estado) {
     }
 }
 
-// HTTP solo local: Python es un puente y C++ mantiene el estado autoritativo.
+// HTTP sirve la interfaz y la API directamente, sin proceso Python.
 // Los handlers solicitan inicio/fin; solo el hilo principal controla la camara
 // y llama EnviarCodigo(). La configuracion se protege con el mismo mutex.
 void configurarAPI(httplib::Server& api, Estado& estado) {
+    api.Get("/", [](const httplib::Request&, httplib::Response& r) {
+        r.set_header("Cache-Control", "no-store");
+        r.set_content(INTERFAZ_CONTROL, "text/html; charset=utf-8");
+    });
+    api.Get("/camara", [](const httplib::Request&, httplib::Response& r) {
+        r.set_redirect("/#vista-camara");
+    });
     api.Get("/api/camara.jpg", [&](const httplib::Request&, httplib::Response& r) {
         r.set_header("Cache-Control", "no-store");
         std::lock_guard<std::mutex> acceso(estado.mutex);
@@ -312,13 +320,13 @@ int main() {
     api.set_read_timeout(2, 0);
     api.set_write_timeout(2, 0);
     configurarAPI(api, estado);
-    if (!api.bind_to_port("127.0.0.1", 8081)) {
-        std::cerr << "No se pudo abrir el puerto local 8081\n";
+    if (!api.bind_to_port("0.0.0.0", 8000)) {
+        std::cerr << "No se pudo abrir el puerto 8000. Detenga servidor.py u otro ciclo_main.\n";
         return 1;
     }
     std::atomic<bool> servidorFinalizado{false};
     std::thread servidor([&] { api.listen_after_bind(); servidorFinalizado = true; });
-    std::cout << "API local: 8081. Abra la interfaz del servidor Python en el puerto 8000.\n"
+    std::cout << "Control y camara: http://<IP-de-la-Raspberry>:8000 (un solo programa C++).\n"
               << "Esperando Inicio. Salida por terminal, I2C desactivado.\n";
     while (!terminar && !servidorFinalizado) {
         bool comenzar;

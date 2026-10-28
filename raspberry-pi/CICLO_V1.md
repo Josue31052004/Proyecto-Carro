@@ -1,93 +1,69 @@
-# Ciclo principal V1 (pendiente de validar en Raspberry)
+# Ciclo principal con interfaz y camara en C++
 
-`main.cpp` mantiene todo el estado y ejecuta captura, deteccion, filtro de eventos
-consecutivos y salida por terminal. Python solo sirve `index.html` y reenvia
-solicitudes al puerto local 8081. No usa smbus2 ni I2C.
+Se ejecuta un solo programa: ciclo_main. main.cpp sirve directamente la pagina
+incluida en vista_control.hpp, la API y los JPEG en el puerto 8000.
+No ejecutar servidor.py. Los archivos anteriores se conservan en legacy/.
+La pagina queda incorporada en el ejecutable; recompilar si cambia el .hpp.
 
-## Compilar y ejecutar
+## Actualizar y ejecutar en Raspberry
 
-En la Raspberry, desde la carpeta `raspberry-pi` del repositorio:
+Detener con Ctrl+C el ciclo anterior Y el servidor Python (liberar puerto 8000).
+Tras recibir los cambios de GitHub, desde ~/Proyecto-Carro/raspberry-pi:
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -pthread main.cpp -o ciclo_main $(pkg-config --cflags --libs opencv4 cpp-httplib) -lssl -lcrypto
 ./ciclo_main
 ```
 
-Necesita las mismas dependencias C++ de la demo funcional. En otra terminal,
-en la misma carpeta, con Flask instalado:
-
-```bash
-python3 servidor.py
-```
-
-Si falta Flask, instalar el paquete del sistema con `sudo apt install python3-flask`.
-Abrir http://192.168.86.28:8000 desde la laptop en la misma red, o reenviar el
-puerto 8000 en VS Code y abrir http://localhost:8000. La IP puede cambiar.
-El programa C++ no abre un navegador ni lanza Python automaticamente.
+Abrir http://192.168.86.28:8000 y recargar con Ctrl+F5. Usar la IP actual si cambia.
+Tambien se puede reenviar el puerto 8000 por Remote SSH y abrir localhost:8000.
+No requiere Flask, Python ni puerto 8081. No cambia las dependencias C++ de la demo.
 
 ## Flujo
 
-1. C++ inicia su API local y espera una solicitud de Inicio.
-2. Inicio abre la camara. Si abre correctamente, imprime 0x00 y entra al ciclo.
-3. Cada frame usa la misma region, rangos HSV y umbral de la demo.
-4. LogicaBloqueo acepta un color nuevo; el ciclo consulta su accion, cuenta una
-   deteccion y llama EnviarCodigo. Esta funcion solo imprime en V1.
-5. Fin sale del ciclo, imprime 0xFF, libera la camara y vuelve a esperar Inicio.
-   Ctrl+C termina C++; detener tambien Python con Ctrl+C en su terminal.
+main inicia HTTP en un hilo auxiliar y espera Inicio. El hilo principal abre
+la camara, imprime 0x00 y ejecuta CicloEjecucion. El detector conserva los rangos
+HSV, region central y minimo de 8%. LogicaBloqueo evita repetir colores
+consecutivos y EnviarCodigo imprime la accion. Fin imprime 0xFF, libera la camara
+y vuelve a esperar. Ctrl+C termina el programa completo.
 
-## Verificacion manual
+La interfaz permite intercambiar las acciones RGB y elegir el ramal amarillo.
+La configuracion solo cambia cuando el ciclo esta detenido. Las solicitudes
+usan formularios HTTP; C++ las valida y mantiene el estado autoritativo.
 
-- Sin Inicio: no debe abrir la camara ni generar eventos de color.
-- Cambiar rojo a retroceder: el selector intercambia la accion del otro color.
-- Pulsar Inicio: debe aparecer Ciclo activo y 0x00 en terminal.
-- Presentar rojo: debe imprimir ROJO y codigo de accion 0x02; contar una vez.
-- Mantener rojo: no debe repetir. Retirarlo hasta NINGUNO y presentarlo de nuevo:
-  debe contar otra vez. Una observacion ambigua no rearma el filtro.
-- Durante el ciclo: configuracion bloqueada. Fin debe volver a estado detenido.
-- Volver a Inicio: contadores a cero y camara abierta nuevamente.
-- Si falla la camara: mostrar error y regresar a espera; no mantener ciclo activo.
-- Si C++ no esta disponible: el puente devuelve 503, no simula exito.
+La misma captura se dibuja y codifica hasta 10 veces por segundo despues de
+la deteccion. JPEG y estado se comparten con mutex. La codificacion ocurre fuera
+del mutex. La camara no se abre dos veces ni desde el hilo HTTP.
+La imagen muestra color y porcentajes RGB/amarillo de la region central.
+C++ rechaza imagenes de mas de dos segundos; el navegador oculta imagenes ante
+fallos o timeout de tres segundos. El enlace antiguo /camara redirige a la vista
+integrada. Antes de Inicio y despues de Fin no se muestra imagen.
 
-## Limites de esta entrega
+## Codigos
 
-No implementa aun el bloqueo temporal de seis segundos ni confirmacion por
-varios frames. Una sola imagen NINGUNO rearma el filtro: calibrar en V2.
-No transmite I2C. Amarillo representa una bifurcacion; el ramal se guarda
-como configuracion y determina la salida 0x04 (derecha) o 0x05 (izquierda). Los cambios se pierden al reiniciar
-C++. El estado activo indica el ciclo de software, no confirma movimiento fisico.
-La apertura y lectura de camara pueden bloquearse en el controlador, como en la
-demo original; Fin se procesa al retornar esas operaciones. Resolver ese limite
-antes de usar esta arquitectura como parada de hardware.
+- Inicio: 0x00. Fin: 0xFF.
+- Frenar: 0x01. Retroceder: 0x02. Velocidad: 0x03.
+- Amarillo: 0x04 si el ramal es derecha, 0x05 si es izquierda.
+- NINGUNO=-1 e INDETERMINADO=-2 son internos, nunca ordenes.
 
-## Amarillo como bifurcacion
+Amarillo usa H=20..34, S>=80 y V>=50: calibrar con la pista.
+Dos colores con al menos 8% producen INDETERMINADO, sin nueva orden.
 
-El detector agrega amarillo con H=20..34, S>=80, V>=50 y ocupacion minima 8%.
-Es un rango inicial por calibrar. Se conserva la region central y los umbrales
-RGB. Dos colores suficientes simultaneos devuelven INDETERMINADO.
+## Pruebas en Raspberry
 
-NINGUNO=-1 e INDETERMINADO=-2 son resultados internos, nunca bytes transmitidos.
-Inicio sigue siendo 0x00 y Fin 0xFF. Los identificadores de color (1..4) se
-traducen a acciones antes de EnviarCodigo; amarillo no indexa la asignacion RGB.
-La salida sigue siendo solo terminal, hasta implementar el transporte I2C.
+1. Arrancar solo ciclo_main. Control y camara deben cargar juntos.
+2. Sin Inicio: sin imagen ni eventos. Cambiar rojo a retroceder y ramal a izquierda.
+3. Inicio: imagen, region y porcentajes; rojo debe producir 0x02, amarillo 0x05.
+4. Mantener el color: un solo conteo. Retirar hasta NINGUNO y volver: otro evento.
+5. Fin: desaparece la imagen, configuracion habilitada. Elegir derecha y volver a
+   iniciar: amarillo produce 0x04. Contadores reiniciados.
+6. Detener C++: mostrar desconexion y ocultar imagen; reiniciar y verificar retorno.
+7. Una segunda instancia debe informar que el puerto 8000 esta ocupado.
 
-Pruebas en Raspberry:
-- Elegir derecha, iniciar y presentar amarillo: una salida 0x04 y un conteo amarillo.
-- Mantener amarillo: no repetir. Retirar hasta NINGUNO y volver: nuevo evento.
-- Fin, elegir izquierda y reiniciar: amarillo debe producir 0x05.
-- Presentar amarillo y rojo suficientes juntos: INDETERMINADO, sin orden.
-- Negro/blanco: NINGUNO, sin orden de Inicio. Confirmar RGB como antes.
+## Limites
 
-## Vista de camara
-
-Abrir `/camara` en el mismo servidor (puerto 8000), o usar el enlace de Control.
-No requiere otro proceso: C++ publica un JPEG de la misma captura hasta 10 veces
-por segundo. Python solo reenvia los bytes. No abrir la demo anterior a la vez.
-Los porcentajes y el color se dibujan sobre el mismo frame, despues de detectar.
-La vista no cambia rangos HSV ni la logica de eventos.
-
-Prueba: antes de Inicio no hay imagen; despues se ve el rectangulo central,
-resultado y porcentajes RGB/amarillo. Al pulsar Fin debe ocultarse la imagen.
-Si se pierde la conexion se oculta tras el timeout de 3 segundos; C++ rechaza
-frames con mas de 2 segundos de antiguedad. Repetir Inicio para comprobar rearme.
-Mantener Control y Camara abiertos y comprobar que Fin sigue respondiendo.
-Para actualizar hay que copiar tambien camara.html, reiniciar Python y recompilar C++.
+Salida solo por terminal: I2C pendiente. Bloqueo temporal de seis segundos y
+confirmacion por varios frames pendientes. La configuracion no persiste al salir.
+El estado activo indica el ciclo de software, no movimiento fisico confirmado.
+La apertura/lectura de camara puede bloquearse en el controlador como en la demo;
+Fin se procesa cuando retorna. No se modifico ese comportamiento en esta entrega.
