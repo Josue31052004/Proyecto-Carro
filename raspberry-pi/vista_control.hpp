@@ -185,7 +185,7 @@ inline constexpr const char* INTERFAZ_CONTROL = R"CONTROL_HTML(
   </div>
 </section>
 
-<section><h2>Salida V1</h2><p>Modo terminal: sin I2C. Los colores proceden de la camara.</p><p>Ultimo codigo de accion: <strong id="ultimoCodigo">—</strong></p></section>
+<section><h2>Salida I2C</h2><p>Envio real a la ESP32 (0x08). Los colores proceden de la camara.</p><p>Ultimo codigo transmitido: <strong id="ultimoCodigo">—</strong></p><p id="estadoI2C" role="status">Esperando estado...</p></section>
 
 <section id="vista-camara">
 <h2>Camara y deteccion</h2>
@@ -241,6 +241,9 @@ inline constexpr const char* INTERFAZ_CONTROL = R"CONTROL_HTML(
     document.getElementById("ultimoCodigo").textContent = datos.ultimo_codigo < 0
       ? "—" : "0x" + datos.ultimo_codigo.toString(16).toUpperCase().padStart(2, "0");
     if (datos.error) mostrarError(datos.error);
+    document.getElementById("estadoI2C").textContent = datos.error_i2c
+      ? "Fallo del ultimo envio I2C. Revisar terminal y ESP32; entrega no confirmada."
+      : (datos.ultimo_codigo < 0 ? "Sin envios todavia." : "Ultima transferencia correcta; no confirma ejecucion de la maniobra.");
     for (var c in selectores) selectores[c].disabled = enMovimiento || editando;
     selBif.disabled = enMovimiento || editando;
     // No se sobrescriben los selectores mientras el usuario los manipula.

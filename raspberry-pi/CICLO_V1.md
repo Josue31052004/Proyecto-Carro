@@ -54,7 +54,7 @@ Dos colores con al menos 8% producen INDETERMINADO, sin nueva orden.
 1. Arrancar solo ciclo_main. Control y camara deben cargar juntos.
 2. Sin Inicio: sin imagen ni eventos. Cambiar rojo a retroceder y ramal a izquierda.
 3. Inicio: imagen, region y porcentajes; rojo debe producir 0x02, amarillo 0x05.
-4. Mantener el color: un solo conteo. Retirar hasta NINGUNO y volver: otro evento.
+4. Mantener el color: un solo conteo. Tras cinco segundos, retirar hasta NINGUNO y volver: otro evento.
 5. Fin: desaparece la imagen, configuracion habilitada. Elegir derecha y volver a
    iniciar: amarillo produce 0x04. Contadores reiniciados.
 6. Detener C++: mostrar desconexion y ocultar imagen; reiniciar y verificar retorno.
@@ -62,8 +62,53 @@ Dos colores con al menos 8% producen INDETERMINADO, sin nueva orden.
 
 ## Limites
 
-Salida solo por terminal: I2C pendiente. Bloqueo temporal de seis segundos y
-confirmacion por varios frames pendientes. La configuracion no persiste al salir.
+Salida real I2C habilitada. La confirmacion por varios frames queda pendiente. La configuracion no persiste al salir.
 El estado activo indica el ciclo de software, no movimiento fisico confirmado.
 La apertura/lectura de camara puede bloquearse en el controlador como en la demo;
 Fin se procesa cuando retorna. No se modifico ese comportamiento en esta entrega.
+
+## Bloqueo de envio
+
+`tiempopausa{5}` define cinco segundos. El primer color valido genera una orden
+inmediatamente. Luego deben cumplirse ambas condiciones en una observacion:
+plazo vencido y color distinto del disparador. Captura, deteccion y vista continuan.
+El contador solo aumenta cuando se acepta un evento, no por cada frame bloqueado.
+
+- Rojo en t=0: orden. Verde en t=2: bloqueado. Verde en t=5 o despues: orden.
+- Rojo sigue presente despues de t=5: sigue bloqueado.
+- NINGUNO despues del plazo: rearma sin enviar; rojo posterior puede generar orden.
+- NINGUNO antes del plazo seguido de rojo al vencer: sigue bloqueado.
+- INDETERMINADO no confirma cambio y no rearma.
+- Inicio y Fin no estan sujetos al bloqueo de colores. Reiniciar el ciclo reinicia
+  este filtro. Un cambio ocurrido solo durante el plazo no se guarda como evento.
+
+La terminal dice `[I2C] Codigo enviado 0xXX, esperando nueva deteccion.`
+El mensaje se imprime solo tras una escritura I2C correcta.
+
+## Integracion I2C real
+
+main abre /dev/i2c-1 una sola vez y selecciona 0x08, como en demoI2C. Si falla
+la apertura/configuracion, termina con error. El descriptor se cierra al salir.
+EnviarCodigo escribe exactamente un byte. Inicio=0x00, Fin=0xFF; RGB usa la
+asignacion de la interfaz y amarillo usa derecha=0x04/izquierda=0x05.
+No ejecutar demoI2C simultaneamente con ciclo_main.
+
+No se necesitan nuevas librerias de enlace: usar el mismo comando de compilacion.
+Mantener el receptor ESP32 y cableado ya probados. Verificar en su monitor serial:
+Inicio, cada color con separacion de cinco segundos y cambio de color, y Fin.
+Probar ambas direcciones para amarillo y cambiar una asignacion RGB con el ciclo
+detenido. Ctrl+C durante el ciclo intenta transmitir Fin antes de cerrar el bus.
+
+Si falla Inicio no arranca la deteccion; se intenta Fin como cierre del ciclo.
+Si falla una orden de color, conserva contador y bloqueo, no reintenta, y sigue
+capturando. El contador representa eventos, no ordenes recibidas. La interfaz
+muestra error del ultimo envio y el ultimo codigo escrito correctamente. Una
+transferencia posterior correcta limpia ese indicador. El fallo de Inicio queda
+ademas en el error del ciclo hasta una nueva solicitud de Inicio.
+Fin no confirma parada fisica: comprobar recepcion en la ESP32. write correcto
+solo confirma transferencia del bus, no ejecucion del firmware.
+
+El bloqueo temporal sigue usando reloj monotono sin sleep. write es sincrono y
+el controlador determina cuanto tarda (especialmente con fallos); durante esa
+llamada se retrasa brevemente el ciclo y el acceso al estado. No se garantiza un
+plazo maximo de parada. Integracion pendiente de compilar y validar en Raspberry.

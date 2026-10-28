@@ -1,4 +1,4 @@
-// Coordinador Raspberry. V1: salida por terminal; sin transmisiones I2C.
+// Coordinador Raspberry: interfaz, vision y envio real de un byte por I2C.
 #include <opencv2/opencv.hpp>
 #include <httplib.h>
 #include "vista_control.hpp"
@@ -16,6 +16,12 @@
 #include <thread>
 #include <vector>
 #include <utility>
+#include <cstdint>
+#include <cstdio>
+#include <fcntl.h>
+#include <linux/i2c-dev.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 // Resultados internos: los valores negativos nunca se envian al ESP32.
 constexpr int NINGUNO = -1, INDETERMINADO = -2;
@@ -25,6 +31,8 @@ constexpr int SATURACION_MINIMA = 80, BRILLO_MINIMO = 50;
 // Estos son codigos de ACCION, no resultados del detector.
 constexpr int INICIO = 0x00, FIN = 0xFF;
 constexpr int BIF_DERECHA = 0x04, BIF_IZQUIERDA = 0x05;
+constexpr const char* DISPOSITIVO_I2C = "/dev/i2c-1";
+constexpr int DIRECCION_ESP32 = 0x08;
 const std::chrono::seconds tiempopausa{5}; // Pausa entre eventos, sin detener captura.
 volatile std::sig_atomic_t terminar = 0;
 void solicitarSalida(int) { terminar = 1; }
@@ -91,12 +99,15 @@ const char* nombreColor(int color) { //Convertir el codigo hex a un string. (Eve
 
 
 struct Estado {
+    int bus = -1; // Abierto una sola vez; solo el hilo principal transmite.
+    ~Estado() { if (bus >= 0) close(bus); }
     std::mutex mutex;
     bool activo = false, iniciar = false, detener = false;
     std::array<int, 3> acciones{1, 2, 3};
     std::array<unsigned, 4> conteo{0, 0, 0, 0};
     std::string ramal = "derecha";
     std::string error;
+    bool errorI2C = false;
     int ultimoCodigo = -1;
     std::string jpeg;
     std::chrono::steady_clock::time_point ultimaImagen{};
@@ -125,15 +136,25 @@ bool LogicaBloqueo(int color, Bloqueo& bloqueo) {
     return true;
 }
 
-// Unico punto de salida. Sustituir el cuerpo por el transporte I2C en V3.
-// Por ahora NO abre /dev/i2c ni escribe en GPIO.
+// Unico punto de salida. Llamar con el mutex adquirido, desde el hilo principal.
+// Una escritura por orden: nunca reenviar automaticamente tras un error.
 bool EnviarCodigo(int codigo, Estado& estado) {
     if (!((codigo >= INICIO && codigo <= BIF_IZQUIERDA) || codigo == FIN)) {
         std::cerr << "Codigo de salida invalido: " << codigo << std::endl;
         return false;
     }
-    estado.ultimoCodigo = codigo; // Llamar con el mutex de estado adquirido.
-    std::cout << "[SIMULACION; sin I2C] Codigo enviado 0x"
+    const uint8_t byte = static_cast<uint8_t>(codigo);
+    const ssize_t enviados = write(estado.bus, &byte, 1);
+    if (enviados != 1) {
+        if (enviados < 0) perror("Error de envio I2C");
+        else std::cerr << "Escritura I2C incompleta\n";
+        estado.errorI2C = true;
+        std::cerr << "Orden " << codigo << " sin confirmacion de entrega; no se reintenta.\n";
+        return false;
+    }
+    estado.errorI2C = false;
+    estado.ultimoCodigo = codigo; // Solo actualizar cuando write acepta el byte.
+    std::cout << "[I2C] Codigo enviado 0x"
               << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
               << codigo << std::dec << ", esperando nueva deteccion." << std::endl;
     return true;
@@ -173,10 +194,13 @@ void CicloEjecucion(Estado& estado) {
         std::lock_guard<std::mutex> acceso(estado.mutex);
         if (estado.detener || terminar) return;
         // Arrancar solo despues de abrir correctamente la camara.
-        estado.activo = true;
         estado.iniciar = false;
+        if (!EnviarCodigo(INICIO, estado)) {
+            estado.error = "Fallo al enviar Inicio por I2C; ciclo no iniciado";
+            return;
+        }
+        estado.activo = true;
         estado.conteo.fill(0);
-        EnviarCodigo(INICIO, estado);
     }
     cv::Mat imagen;
     int ultimoColor = -3; // Distinto de todos los resultados del detector.
@@ -263,7 +287,8 @@ void configurarAPI(httplib::Server& api, Estado& estado) {
         std::ostringstream json;
         json << "{\"en_movimiento\":" << (estado.activo ? "true" : "false")
              << ",\"iniciando\":" << (estado.iniciar ? "true" : "false")
-             << ",\"modo\":\"terminal\",\"error\":\"" << estado.error << "\""
+             << ",\"modo\":\"i2c\",\"error\":\"" << estado.error << "\""
+             << ",\"error_i2c\":" << (estado.errorI2C ? "true" : "false")
              << ",\"ultimo_codigo\":" << estado.ultimoCodigo
              << ",\"conteo\":{\"rojo\":" << estado.conteo[0]
              << ",\"verde\":" << estado.conteo[1] << ",\"azul\":" << estado.conteo[2]
@@ -322,6 +347,15 @@ int main() {
     std::signal(SIGINT, solicitarSalida);
     std::signal(SIGTERM, solicitarSalida);
     Estado estado;
+    estado.bus = open(DISPOSITIVO_I2C, O_RDWR);
+    if (estado.bus < 0) {
+        perror("No se pudo abrir /dev/i2c-1");
+        return 1;
+    }
+    if (ioctl(estado.bus, I2C_SLAVE, DIRECCION_ESP32) < 0) {
+        perror("No se pudo seleccionar direccion I2C 0x08");
+        return 1;
+    }
     httplib::Server api;
     api.new_task_queue = [] { return new httplib::ThreadPool(2); };
     api.set_read_timeout(2, 0);
@@ -334,7 +368,7 @@ int main() {
     std::atomic<bool> servidorFinalizado{false};
     std::thread servidor([&] { api.listen_after_bind(); servidorFinalizado = true; });
     std::cout << "Control y camara: http://<IP-de-la-Raspberry>:8000 (un solo programa C++).\n"
-              << "Esperando Inicio. Salida por terminal, I2C desactivado.\n";
+              << "Esperando Inicio. I2C real: /dev/i2c-1, destino 0x08.\n";
     while (!terminar && !servidorFinalizado) {
         bool comenzar;
         {
