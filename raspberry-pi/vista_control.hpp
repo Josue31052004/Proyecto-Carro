@@ -1,0 +1,413 @@
+#pragma once
+// Interfaz integrada en ciclo_main. Recompilar despues de editar este archivo.
+inline constexpr const char* INTERFAZ_CONTROL = R"CONTROL_HTML(
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Carro seguidor de pista</title>
+<style>
+  :root {
+    --fondo: #f4f5f7;
+    --tarjeta: #ffffff;
+    --borde: #d8dbe0;
+    --texto: #1c1f24;
+    --suave: #6b7280;
+    --rojo: #c0392b;
+    --verde: #1e8449;
+    --azul: #1f618d;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--fondo);
+    color: var(--texto);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  header { margin-bottom: 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .curso { color: var(--suave); font-size: 13px; margin: 0; }
+
+  .estado {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 12px; padding: 7px 14px;
+    border-radius: 999px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--borde); background: var(--tarjeta);
+  }
+  .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--suave); }
+  .estado.moviendo { border-color: #a9dfbf; background: #eafaf1; color: var(--verde); }
+  .estado.moviendo .punto { background: var(--verde); animation: latir 1.1s ease-in-out infinite; }
+  @keyframes latir { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  section {
+    background: var(--tarjeta);
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 14px;
+  }
+  h2 {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--suave);
+    margin: 0 0 14px;
+  }
+
+  .botones { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button.principal {
+    padding: 18px 12px; font-size: 17px; font-weight: 600;
+    border: none; border-radius: 10px; color: #fff; cursor: pointer;
+  }
+  #btnInicio { background: var(--verde); }
+  #btnFin { background: var(--rojo); }
+  button.principal:disabled { opacity: .4; cursor: not-allowed; }
+  button.principal:active:not(:disabled) { transform: translateY(1px); }
+
+  .fila {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 0; border-bottom: 1px solid #eef0f2;
+  }
+  .fila:last-of-type { border-bottom: none; }
+  .muestra { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+  .muestra.rojo { background: var(--rojo); }
+  .muestra.verde { background: var(--verde); }
+  .muestra.azul { background: var(--azul); }
+  .fila label { flex: 1; font-weight: 500; }
+  select {
+    font-size: 15px; padding: 9px 10px; border-radius: 8px;
+    border: 1px solid var(--borde); background: #fff; color: var(--texto);
+    min-width: 170px;
+  }
+
+  .error {
+    display: none; margin-top: 14px; padding: 12px 14px;
+    border: 1px solid #e6b0aa; background: #fdedec; color: var(--rojo);
+    border-radius: 8px; font-size: 14px; font-weight: 500;
+  }
+  .error.visible { display: block; }
+
+  .conteo { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .marcador {
+    text-align: center; padding: 16px 8px;
+    border: 1px solid var(--borde); border-radius: 10px;
+  }
+  .marcador .cifra { font-size: 34px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .marcador .nombre { font-size: 13px; color: var(--suave); margin-top: 6px; }
+  .marcador.rojo .cifra { color: var(--rojo); }
+  .marcador.verde .cifra { color: var(--verde); }
+  .marcador.azul .cifra { color: var(--azul); }
+  .marcador.amarillo .cifra { color: #8a6500; }
+
+  .pruebas button {
+    padding: 10px 14px; margin: 0 8px 8px 0; font-size: 14px;
+    border: 1px solid var(--borde); background: #fff; color: var(--texto);
+    border-radius: 8px; cursor: pointer;
+  }
+  .aviso { font-size: 12px; color: var(--suave); margin: 0 0 12px; }
+  footer { text-align: center; color: var(--suave); font-size: 12px; margin: 18px 0 8px; }
+#camara{width:100%;max-width:640px;border-radius:8px} #camara[hidden]{display:none} .fila{flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header>
+
+  <h1>Carro seguidor de pista</h1>
+  <p class="curso">MT-7003 Microprocesadores y Microcontroladores</p>
+  <div class="estado" id="estado"><span class="punto"></span><span id="estadoTexto">Detenido</span></div>
+</header>
+
+<section>
+  <h2>Control</h2>
+  <div class="botones">
+    <button class="principal" id="btnInicio">Inicio</button>
+    <button class="principal" id="btnFin">Fin</button>
+  </div>
+</section>
+
+<section>
+  <h2>Configuracion</h2>
+
+  <div class="fila">
+    <span class="muestra rojo"></span>
+    <label for="selRojo">Rojo</label>
+    <select id="selRojo" data-color="rojo">
+      <option value="frenar">Frenar</option>
+      <option value="retroceder">Retroceder</option>
+      <option value="velocidad">Cambio de velocidad</option>
+    </select>
+  </div>
+
+  <div class="fila">
+    <span class="muestra verde"></span>
+    <label for="selVerde">Verde</label>
+    <select id="selVerde" data-color="verde">
+      <option value="frenar">Frenar</option>
+      <option value="retroceder">Retroceder</option>
+      <option value="velocidad">Cambio de velocidad</option>
+    </select>
+  </div>
+
+  <div class="fila">
+    <span class="muestra azul"></span>
+    <label for="selAzul">Azul</label>
+    <select id="selAzul" data-color="azul">
+      <option value="frenar">Frenar</option>
+      <option value="retroceder">Retroceder</option>
+      <option value="velocidad">Cambio de velocidad</option>
+    </select>
+  </div>
+
+  <div class="fila">
+    <span class="muestra" style="background:#f1c40f"></span>
+    <label for="selBif">Amarillo: bifurcacion</label>
+    <select id="selBif">
+      <option value="izquierda">Izquierda</option>
+      <option value="derecha">Derecha</option>
+    </select>
+  </div>
+
+  <div class="error" id="error"></div>
+</section>
+
+<section>
+  <h2>Segmentos encontrados</h2>
+  <div class="conteo">
+    <div class="marcador rojo"><div class="cifra" id="cRojo">0</div><div class="nombre">Rojo</div></div>
+    <div class="marcador verde"><div class="cifra" id="cVerde">0</div><div class="nombre">Verde</div></div>
+    <div class="marcador azul"><div class="cifra" id="cAzul">0</div><div class="nombre">Azul</div></div>
+    <div class="marcador amarillo"><div class="cifra" id="cAmarillo">0</div><div class="nombre">Amarillo / bifurcacion</div></div>
+  </div>
+</section>
+
+<section><h2>Salida I2C</h2><p>Envio real a la ESP32 (0x08). Los colores proceden de la camara.</p><p>Ultimo codigo transmitido: <strong id="ultimoCodigo">—</strong></p><p id="estadoI2C" role="status">Esperando estado...</p></section>
+
+<section id="vista-camara">
+<h2>Camara y deteccion</h2>
+<p id="estadoCamara" role="status">Pulsa Inicio para activar la camara.</p>
+<img id="camara" alt="Camara, region de deteccion y porcentajes de colores" hidden>
+<p>R: rojo · V: verde · A: azul. Los porcentajes corresponden a la region central. Umbral: 8%. Dos colores suficientes producen INDETERMINADO.</p>
+<p>Amarillo: H=20..34, S≥80, V≥50. Vista activa durante el ciclo; se oculta al detenerse.</p>
+</section>
+<footer id="conexion">Conectando...</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var selectores = {
+    rojo: document.getElementById("selRojo"),
+    verde: document.getElementById("selVerde"),
+    azul: document.getElementById("selAzul")
+  };
+  var selBif = document.getElementById("selBif");
+  var cajaError = document.getElementById("error");
+  var pieConexion = document.getElementById("conexion");
+
+  var ultimaAsignacion = { rojo: "frenar", verde: "retroceder", azul: "velocidad" };
+  var ultimoRamal = "derecha";
+  var enMovimiento = false;
+  var editando = false;
+
+  function mostrarError(texto) {
+    cajaError.textContent = texto;
+    cajaError.classList.add("visible");
+  }
+
+  function limpiarError() {
+    cajaError.classList.remove("visible");
+  }
+
+  function pintarEstado(datos) {
+    enMovimiento = datos.en_movimiento || datos.iniciando;
+
+    var caja = document.getElementById("estado");
+    document.getElementById("estadoTexto").textContent = datos.iniciando ? "Iniciando camara..." : (enMovimiento ? "Ciclo activo (demo)" : "Detenido");
+    caja.classList.toggle("moviendo", enMovimiento);
+
+    document.getElementById("btnInicio").disabled = enMovimiento || editando;
+    document.getElementById("btnFin").disabled = !enMovimiento;
+
+    document.getElementById("cRojo").textContent = datos.conteo.rojo;
+    document.getElementById("cVerde").textContent = datos.conteo.verde;
+    document.getElementById("cAzul").textContent = datos.conteo.azul;
+    document.getElementById("cAmarillo").textContent = datos.conteo.amarillo;
+
+    document.getElementById("ultimoCodigo").textContent = datos.ultimo_codigo < 0
+      ? "—" : "0x" + datos.ultimo_codigo.toString(16).toUpperCase().padStart(2, "0");
+    if (datos.error) mostrarError(datos.error);
+    document.getElementById("estadoI2C").textContent = datos.error_i2c
+      ? "Fallo del ultimo envio I2C. Revisar terminal y ESP32; entrega no confirmada."
+      : (datos.ultimo_codigo < 0 ? "Sin envios todavia." : "Ultima transferencia correcta; no confirma ejecucion de la maniobra.");
+    for (var c in selectores) selectores[c].disabled = enMovimiento || editando;
+    selBif.disabled = enMovimiento || editando;
+    // No se sobrescriben los selectores mientras el usuario los manipula.
+    if (!editando) {
+      ultimaAsignacion = datos.asignacion;
+      ultimoRamal = datos.bifurcacion;
+      for (var color in selectores) {
+        if (selectores[color].value !== datos.asignacion[color]) {
+          selectores[color].value = datos.asignacion[color];
+        }
+      }
+      if (selBif.value !== datos.bifurcacion) {
+        selBif.value = datos.bifurcacion;
+      }
+    }
+  }
+
+  function restaurarSelectores() {
+    for (var color in selectores) {
+      selectores[color].value = ultimaAsignacion[color];
+    }
+    selBif.value = ultimoRamal;
+  }
+
+  function enviarConfiguracion() {
+    // Cada accion debe quedar asignada a un unico color.
+    var asignacion = {
+      rojo: selectores.rojo.value,
+      verde: selectores.verde.value,
+      azul: selectores.azul.value
+    };
+
+    editando = true;
+    for (var c in selectores) selectores[c].disabled = true;
+    selBif.disabled = true;
+    document.getElementById("btnInicio").disabled = true;
+    fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ rojo: asignacion.rojo, verde: asignacion.verde, azul: asignacion.azul, bifurcacion: selBif.value }).toString()
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, datos: d }; }); })
+      .then(function (res) {
+        if (res.ok) {
+          limpiarError();
+          ultimaAsignacion = asignacion;
+          ultimoRamal = selBif.value;
+        } else {
+          mostrarError(res.datos.error || "No se pudo guardar la configuracion.");
+          restaurarSelectores();
+        }
+      })
+      .catch(function () {
+        mostrarError("Sin conexion con la Raspberry Pi.");
+        restaurarSelectores();
+      })
+      .then(function () { editando = false; consultarEstado(); });
+  }
+
+  // Al cambiar un color, la accion que ya tenia otro color se intercambia,
+  // de modo que las tres acciones siempre quedan repartidas entre los tres colores.
+  function alCambiarColor(evento) {
+    var colorEditado = evento.target.getAttribute("data-color");
+    var accionNueva = evento.target.value;
+    var accionAnterior = ultimaAsignacion[colorEditado];
+
+    for (var color in selectores) {
+      if (color !== colorEditado && selectores[color].value === accionNueva) {
+        selectores[color].value = accionAnterior;
+      }
+    }
+    enviarConfiguracion();
+  }
+
+  for (var color in selectores) {
+    selectores[color].addEventListener("change", alCambiarColor);
+  }
+  selBif.addEventListener("change", enviarConfiguracion);
+
+  function enviarOrden(ruta) {
+    limpiarError();
+    fetch(ruta, { method: "POST" })
+      .then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok) throw new Error(d.error || "No se pudo enviar la solicitud");
+        });
+      })
+      .then(consultarEstado)
+      .catch(function (e) { mostrarError(e.message); });
+  }
+  document.getElementById("btnInicio").addEventListener("click", function () {
+    enviarOrden("/api/inicio");
+  });
+  document.getElementById("btnFin").addEventListener("click", function () {
+    enviarOrden("/api/fin");
+  });
+
+  function consultarEstado() {
+    return fetch("/api/estado")
+      .then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok) throw new Error(d.error || "Error al consultar estado");
+          return d;
+        });
+      })
+      .then(function (datos) {
+        pintarEstado(datos);
+        pieConexion.textContent = "Conectado";
+      })
+      .catch(function () {
+        document.getElementById("estadoTexto").textContent = "Estado desconocido";
+        document.getElementById("btnInicio").disabled = true;
+        pieConexion.textContent = "Sin conexion con la Raspberry Pi o ciclo_main";
+      });
+  }
+
+  consultarEstado();
+  setInterval(consultarEstado, 400);
+})();
+</script>
+
+<script>
+(function(){
+
+const foto = document.getElementById('camara');
+const estado = document.getElementById('estadoCamara');
+let anterior;
+function ocultar(mensaje) {
+  foto.hidden = true;
+  foto.removeAttribute('src');
+  if (anterior) URL.revokeObjectURL(anterior);
+  anterior = undefined;
+  estado.textContent = mensaje;
+}
+async function actualizar() {
+  const control = new AbortController();
+  const limite = setTimeout(() => control.abort(), 3000);
+  let siguiente;
+  try {
+    const respuesta = await fetch('/api/camara.jpg', {cache:'no-store', signal:control.signal});
+    if (!respuesta.ok) throw new Error('Sin imagen reciente');
+    siguiente = URL.createObjectURL(await respuesta.blob());
+    const prueba = new Image();
+    prueba.src = siguiente;
+    await prueba.decode();
+    if (control.signal.aborted) throw new Error('Imagen vencida');
+    foto.src = siguiente;
+    foto.hidden = false;
+    if (anterior) URL.revokeObjectURL(anterior);
+    anterior = siguiente;
+    siguiente = undefined;
+    estado.textContent = 'Recibiendo imagenes · ' + new Date().toLocaleTimeString();
+  } catch (error) {
+    ocultar('Camara detenida o sin imagen reciente. Revisa Inicio, ciclo_main y la conexion.');
+  } finally {
+    if (siguiente) URL.revokeObjectURL(siguiente);
+    clearTimeout(limite);
+    setTimeout(actualizar, 150);
+  }
+}
+actualizar();
+
+})();
+</script>
+</body>
+</html>
+)CONTROL_HTML";
