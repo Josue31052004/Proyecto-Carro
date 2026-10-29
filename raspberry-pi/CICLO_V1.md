@@ -126,3 +126,15 @@ La vista se codifica como maximo cada 333 ms (~3/s), para reducir carga JPEG.
 Se evita contar dos veces los mismos pixeles en cada mascara. Appsink mantiene
 solo el frame mas reciente, sin acumular imagenes atrasadas.
 La demo de calibracion permanece independiente, sin cambiar sus valores iniciales.
+
+## Bloqueo vigente: sin tiempo (sustituye la regla anterior de cinco segundos)
+
+Se compara el codigo de accion con el ultimo evento aceptado. NINGUNO no borra
+ese recuerdo: rojo -> ninguno -> rojo genera solo una orden. Rojo -> verde ->
+rojo genera tres, sin espera. Amarillo es la excepcion: amarillo -> ninguno ->
+amarillo genera dos bifurcaciones, pero mantener amarillo solo genera una.
+INDETERMINADO no rearma amarillo ni borra el ultimo codigo. Una bifurcacion
+aceptada tambien actualiza el ultimo codigo: rojo -> amarillo -> rojo se permite.
+Inicio/Fin no pasan por este filtro. Cada nuevo ciclo reinicia la memoria.
+Se registra el evento antes del envio: un fallo I2C conserva el bloqueo para no
+reintentar automaticamente una orden cuya recepcion no se conoce.

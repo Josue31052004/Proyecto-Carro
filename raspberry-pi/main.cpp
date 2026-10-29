@@ -37,7 +37,6 @@ constexpr int ANCHO_CAPTURA = 640, ALTO_CAPTURA = 480;
 constexpr int CUADRO_PORCENTAJE = 70;
 constexpr int FPS_CAPTURA = 60; // Objetivo a validar en la camara real, no FPS garantizados.
 constexpr int INTERVALO_VISTA_MS = 333; // Aproximadamente 3 JPEG/s; priorizar deteccion.
-const std::chrono::seconds tiempopausa{5}; // Pausa entre eventos, sin detener captura.
 volatile std::sig_atomic_t terminar = 0;
 void solicitarSalida(int) { terminar = 1; }
 
@@ -115,26 +114,26 @@ struct Estado {
     std::chrono::steady_clock::time_point ultimaImagen{};
 };
 struct Bloqueo {
-    int ultimoColor = NINGUNO;
-    bool activo = false;
-    std::chrono::steady_clock::time_point limite{};
+    int ultimoCodigoAceptado = -1;
+    bool amarilloPresente = false;
 };
 
-// Solo permite otra orden cuando paso tiempopausa Y la observacion actual
-// es distinta del color que disparo la anterior. No duerme ni espera en un bucle.
-// NINGUNO permite rearmar despues del plazo, pero no genera una orden.
-// INDETERMINADO no confirma cambio ni rearma. Inicio/Fin no pasan por este filtro.
-bool LogicaBloqueo(int color, Bloqueo& bloqueo) {
+// Sin temporizador: NINGUNO no borra el ultimo codigo aceptado.
+// Amarillo puede repetir, pero solo una vez por presencia continua.
+// Indeterminado no confirma salida. Inicio/Fin quedan fuera de este filtro.
+// Se recuerda el intento aunque falle I2C, para no reenviar ciegamente.
+bool LogicaBloqueo(int color, int codigo, Bloqueo& bloqueo) {
     if (color != NINGUNO && (color < ROJO || color > AMARILLO)) return false;
-    const auto ahora = std::chrono::steady_clock::now();
-    if (bloqueo.activo) {
-        if (ahora < bloqueo.limite || color == bloqueo.ultimoColor) return false;
-        bloqueo.activo = false;
+    if (color == AMARILLO) {
+        if (codigo != BIF_DERECHA && codigo != BIF_IZQUIERDA) return false;
+        if (bloqueo.amarilloPresente) return false;
+        bloqueo.amarilloPresente = true;
+    } else {
+        bloqueo.amarilloPresente = false;
+        if (color == NINGUNO) return false;
+        if (codigo < 1 || codigo > 3 || codigo == bloqueo.ultimoCodigoAceptado) return false;
     }
-    if (color == NINGUNO) return false;
-    bloqueo.ultimoColor = color;
-    bloqueo.limite = ahora + tiempopausa;
-    bloqueo.activo = true;
+    bloqueo.ultimoCodigoAceptado = codigo;
     return true;
 }
 
@@ -278,9 +277,10 @@ void CicloEjecucion(Estado& estado) {
             std::cout << "[VISION] " << nombreColor(color) << std::endl;
             ultimoColor = color;
         }
-        if (LogicaBloqueo(color, bloqueo)) {
+        const int codigo = accionParaColor(color, estado);
+        if (LogicaBloqueo(color, codigo, bloqueo)) {
             ++estado.conteo[color - 1];
-            EnviarCodigo(accionParaColor(color, estado), estado);
+            EnviarCodigo(codigo, estado);
         }
     }
 }
