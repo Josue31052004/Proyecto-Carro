@@ -33,6 +33,10 @@ constexpr int INICIO = 0x00, FIN = 0xFF;
 constexpr int BIF_DERECHA = 0x04, BIF_IZQUIERDA = 0x05;
 constexpr const char* DISPOSITIVO_I2C = "/dev/i2c-1";
 constexpr int DIRECCION_ESP32 = 0x08;
+constexpr int ANCHO_CAPTURA = 640, ALTO_CAPTURA = 480;
+constexpr int CUADRO_PORCENTAJE = 70;
+constexpr int FPS_CAPTURA = 60; // Objetivo a validar en la camara real, no FPS garantizados.
+constexpr int INTERVALO_VISTA_MS = 333; // Aproximadamente 3 JPEG/s; priorizar deteccion.
 const std::chrono::seconds tiempopausa{5}; // Pausa entre eventos, sin detener captura.
 volatile std::sig_atomic_t terminar = 0;
 void solicitarSalida(int) { terminar = 1; }
@@ -66,14 +70,12 @@ int detectarColor(const cv::Mat& imagen, std::array<double, 4>& porcentajes) {
 
 
     const double minimo = imagen.total() * FRACCION_MINIMA;
-    bool hayRojo = cv::countNonZero(rojo) >= minimo; //Definir si hay suficiente rojo
-    bool hayVerde = cv::countNonZero(verde) >= minimo; //Definir si hay suficiente verde
-    bool hayAzul = cv::countNonZero(azul) >= minimo; //Definir si hay suficiente azul
-    bool hayAmarillo = cv::countNonZero(amarillo) >= minimo;
-    porcentajes = {100.0 * cv::countNonZero(rojo) / imagen.total(),
-                   100.0 * cv::countNonZero(verde) / imagen.total(),
-                   100.0 * cv::countNonZero(azul) / imagen.total(),
-                   100.0 * cv::countNonZero(amarillo) / imagen.total()};
+    const std::array<int,4> pixeles{cv::countNonZero(rojo),cv::countNonZero(verde),
+                                  cv::countNonZero(azul),cv::countNonZero(amarillo)};
+    bool hayRojo = pixeles[0] >= minimo, hayVerde = pixeles[1] >= minimo;
+    bool hayAzul = pixeles[2] >= minimo, hayAmarillo = pixeles[3] >= minimo;
+    for (size_t i=0; i<pixeles.size(); ++i)
+        porcentajes[i] = 100.0 * pixeles[i] / imagen.total();
 
     if (int(hayRojo) + int(hayVerde) + int(hayAzul) + int(hayAmarillo) > 1)
         return INDETERMINADO; //Se detecto mas de 1 color
@@ -183,11 +185,22 @@ int accionParaColor(int color, const Estado& estado) {
 
 void CicloEjecucion(Estado& estado) {
     // Misma cadena de captura que la demo funcional.
-    const std::string pipeline =
-        "libcamerasrc ! video/x-raw,format=NV12,width=640,height=480,"
-        "framerate=30/1,colorimetry=bt601 ! videoconvert ! "
-        "video/x-raw,format=BGR ! appsink max-buffers=1 drop=true sync=false";
-    cv::VideoCapture camara(pipeline, cv::CAP_GSTREAMER);
+    auto pipeline = [](int fps) {
+        return "libcamerasrc ! video/x-raw,format=NV12,width=" + std::to_string(ANCHO_CAPTURA)
+            + ",height=" + std::to_string(ALTO_CAPTURA) + ",framerate=" + std::to_string(fps)
+            + "/1,colorimetry=bt601 ! videoconvert ! video/x-raw,format=BGR ! "
+              "appsink max-buffers=1 drop=true sync=false";
+    };
+    cv::VideoCapture camara;
+    bool abierta = false;
+    try { abierta = camara.open(pipeline(FPS_CAPTURA), cv::CAP_GSTREAMER); }
+    catch (const cv::Exception& e) { std::cerr << e.what() << std::endl; }
+    if (terminar) return;
+    if (!abierta) {
+        std::cerr << "No se pudo abrir a " << FPS_CAPTURA << " FPS; probando 30 FPS.\n";
+        camara.release();
+        camara.open(pipeline(30), cv::CAP_GSTREAMER);
+    }
     if (!camara.isOpened()) throw std::runtime_error("No se pudo abrir la camara");
     Bloqueo bloqueo;
     {
@@ -205,6 +218,8 @@ void CicloEjecucion(Estado& estado) {
     cv::Mat imagen;
     int ultimoColor = -3; // Distinto de todos los resultados del detector.
     auto ultimaPublicacion = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    auto inicioMedicion = std::chrono::steady_clock::now();
+    unsigned framesProcesados = 0;
     while (!terminar) {
         {
             std::lock_guard<std::mutex> acceso(estado.mutex);
@@ -215,15 +230,25 @@ void CicloEjecucion(Estado& estado) {
             throw std::runtime_error("Error de captura");
         if (imagen.cols < 4 || imagen.rows < 4)
             throw std::runtime_error("Tamano de imagen invalido");
-        cv::Rect region(imagen.cols / 4, imagen.rows / 4,
-                        imagen.cols / 2, imagen.rows / 2);
+        const int anchoRegion = std::max(1, imagen.cols * CUADRO_PORCENTAJE / 100);
+        const int altoRegion = std::max(1, imagen.rows * CUADRO_PORCENTAJE / 100);
+        cv::Rect region((imagen.cols-anchoRegion)/2, (imagen.rows-altoRegion)/2,
+                        anchoRegion, altoRegion);
         std::array<double, 4> porcentajes{};
         const int color = detectarColor(imagen(region), porcentajes);
         // Dibujar DESPUES de detectar; no altera las mascaras ni el resultado.
         // Codificar fuera del mutex para no bloquear las solicitudes de control.
         std::string nuevoJpeg;
         const auto captura = std::chrono::steady_clock::now();
-        if (captura - ultimaPublicacion >= std::chrono::milliseconds(100)) {
+        ++framesProcesados;
+        const double segundos = std::chrono::duration<double>(captura-inicioMedicion).count();
+        if (segundos >= 5.0) {
+            std::cout << "[RENDIMIENTO] " << framesProcesados/segundos
+                      << " FPS procesados; imagen " << imagen.cols << 'x' << imagen.rows
+                      << "; ROI " << anchoRegion << 'x' << altoRegion << std::endl;
+            inicioMedicion=captura;framesProcesados=0;
+        }
+        if (captura - ultimaPublicacion >= std::chrono::milliseconds(INTERVALO_VISTA_MS)) {
             cv::rectangle(imagen, region, cv::Scalar(0, 255, 255), 2);
             cv::rectangle(imagen, cv::Rect(0, 0, imagen.cols, std::min(90, imagen.rows)),
                           cv::Scalar(0, 0, 0), cv::FILLED);

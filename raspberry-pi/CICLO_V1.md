@@ -112,3 +112,17 @@ El bloqueo temporal sigue usando reloj monotono sin sleep. write es sincrono y
 el controlador determina cuanto tarda (especialmente con fallos); durante esa
 llamada se retrasa brevemente el ciclo y el acceso al estado. No se garantiza un
 plazo maximo de parada. Integracion pendiente de compilar y validar en Raspberry.
+
+## Ajuste de rendimiento (29 octubre 2026)
+
+640x480, cuadro centrado del 70% de ancho y alto: 448x336 (49% del area).
+Conserva rangos HSV y umbral de ocupacion 8% de la region.
+Solicita 60 FPS; si la apertura falla, intenta 30 y lo informa en terminal.
+No garantiza 60 FPS ni determina el maximo del sensor: validar en hardware.
+Si abre pero falla la lectura, se detiene el ciclo como antes, sin fallback.
+La terminal informa FPS realmente procesados cada cinco segundos; esta medida
+incluye el efecto de procesamiento, vista e I2C, no mide todos los frames del sensor.
+La vista se codifica como maximo cada 333 ms (~3/s), para reducir carga JPEG.
+Se evita contar dos veces los mismos pixeles en cada mascara. Appsink mantiene
+solo el frame mas reciente, sin acumular imagenes atrasadas.
+La demo de calibracion permanece independiente, sin cambiar sus valores iniciales.
