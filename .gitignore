@@ -29,3 +29,5 @@ desktop.ini
 
 # Ejecutable local del ciclo Raspberry
 raspberry-pi/ciclo_main
+
+/raspberry-pi/Detectar Colores Demo/calibrar_colores

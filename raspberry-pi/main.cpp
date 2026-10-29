@@ -26,7 +26,7 @@
 // Resultados internos: los valores negativos nunca se envian al ESP32.
 constexpr int NINGUNO = -1, INDETERMINADO = -2;
 constexpr int ROJO = 1, VERDE = 2, AZUL = 3, AMARILLO = 4;
-constexpr double FRACCION_MINIMA = 0.08;
+constexpr double FRACCION_MINIMA = 0.05;
 constexpr int SATURACION_MINIMA = 80, BRILLO_MINIMO = 50;
 // Estos son codigos de ACCION, no resultados del detector.
 constexpr int INICIO = 0x00, FIN = 0xFF;
@@ -34,7 +34,7 @@ constexpr int BIF_DERECHA = 0x04, BIF_IZQUIERDA = 0x05;
 constexpr const char* DISPOSITIVO_I2C = "/dev/i2c-1";
 constexpr int DIRECCION_ESP32 = 0x08;
 constexpr int ANCHO_CAPTURA = 640, ALTO_CAPTURA = 480;
-constexpr int CUADRO_PORCENTAJE = 70;
+constexpr int CUADRO_PORCENTAJE = 90;
 constexpr int FPS_CAPTURA = 60; // Objetivo a validar en la camara real, no FPS garantizados.
 constexpr int INTERVALO_VISTA_MS = 333; // Aproximadamente 3 JPEG/s; priorizar deteccion.
 volatile std::sig_atomic_t terminar = 0;
