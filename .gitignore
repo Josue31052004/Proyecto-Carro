@@ -1,17 +1,21 @@
-# Python
-__pycache__/
-*.py[cod]
-venv/
-.venv/
-env/
-
-# ESP-IDF
+# Compilación y ESP-IDF
 build/
+cmake-build-*/
+sdkconfig
 sdkconfig.old
 managed_components/
 dependencies.lock
 
-# Archivos temporales de Word y Office
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.log
+venv/
+.venv/
+env/
+
+# Archivos temporales de Office
 ~$*.docx
 ~$*.xlsx
 ~$*.pptx
@@ -22,12 +26,15 @@ dependencies.lock
 Thumbs.db
 desktop.ini
 
-# Editores
+# Editores y PlatformIO
 .vscode/
 .idea/
+.pio/
 *.swp
 
 # Ejecutable local del ciclo Raspberry
 raspberry-pi/ciclo_main
 
+#Ejecutable local de calibracion
 /raspberry-pi/Detectar Colores Demo/calibrar_colores
+
